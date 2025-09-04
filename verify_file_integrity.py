@@ -144,8 +144,8 @@ def format_report(result: CheckResult) -> str:
     lines.append("")
 
     lines.append(f"Toplam Yeni Dosya: {len(result.new_files)}")
-    lines.append(f"Toplam Silinmis Dosya: {len(result.deleted_files)}")
-    lines.append(f"Toplam Degistirilmis Dosya: {len(result.modified_files)}")
+    lines.append(f"Toplam Silinmiş Dosya: {len(result.deleted_files)}")
+    lines.append(f"Toplam Değiştirilmiş Dosya: {len(result.modified_files)}")
     lines.append("")
 
     if result.new_files:
@@ -155,13 +155,13 @@ def format_report(result: CheckResult) -> str:
         lines.append("")
 
     if result.deleted_files:
-        lines.append("[Silinmis Dosyalar]")
+        lines.append("[Silinmiş Dosyalar]")
         for r in result.deleted_files:
             lines.append(f"- {r.relative_path} | {r.file_size_bytes} B | {r.modified_time_utc_iso}")
         lines.append("")
 
     if result.modified_files:
-        lines.append("[Degistirilmis Dosyalar]")
+        lines.append("[Değiştirilmis Dosyalar]")
         for base_rec, cur_rec in result.modified_files:
             lines.append(
                 f"* {base_rec.relative_path}\n  eski: {base_rec.file_size_bytes} B | {base_rec.modified_time_utc_iso} | {base_rec.sha256_hex[:12]}...\n  yeni: {cur_rec.file_size_bytes} B | {cur_rec.modified_time_utc_iso} | {cur_rec.sha256_hex[:12]}..."
@@ -183,7 +183,7 @@ def build_command(args: argparse.Namespace) -> int:
     exts = parse_extensions(args.ext)
     records = build_inventory(args.root, exts)
     write_inventory_csv(records, args.output)
-    print(f"Envanter olusturuldu: {args.output} ({len(records)} kayit)")
+    print(f"Envanter oluşturuldu: {args.output} ({len(records)} kayıt)")
     return 0
 
 
@@ -200,7 +200,7 @@ def check_command(args: argparse.Namespace) -> int:
         print(report_text)
 
     print(
-        f"Yeni: {len(result.new_files)}, Silinmis: {len(result.deleted_files)}, Degistirilmis: {len(result.modified_files)}"
+        f"Yeni: {len(result.new_files)}, Silinmiş: {len(result.deleted_files)}, Değiştirilmiş: {len(result.modified_files)}"
     )
 
     return 0
@@ -219,7 +219,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "build", help="Dosya envanteri oluştur (path, size, mtime, sha256)"
     )
     build_parser.add_argument(
-        "--root", default=".", help="Taranacak kök dizin (varsayilan: .)"
+        "--root", default=".", help="Taranacak kök dizin (varsayılan: .)"
     )
     build_parser.add_argument(
         "--ext",
@@ -261,10 +261,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         return args.func(args)
     except KeyboardInterrupt:
-        print("Iptal edildi.")
+        print("İptal edildi.")
         return 130
     except FileNotFoundError as e:
-        print(f"Hata: Dosya bulunamadi: {e}")
+        print(f"Hata: Dosya bulunamadı: {e}")
         return 2
     except Exception as e:
         print(f"Beklenmeyen hata: {e}")
