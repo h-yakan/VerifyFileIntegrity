@@ -4,6 +4,7 @@ import csv
 import hashlib
 import os
 import sys
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Set, Tuple
@@ -58,7 +59,10 @@ def to_iso_utc(timestamp: float) -> str:
 
 def build_inventory(root_dir: str, allowed_extensions: Set[str]) -> List[FileRecord]:
     root_dir_abs = os.path.abspath(root_dir)
+    logging.info("Tarama başladı: %s", root_dir_abs)
+    logging.debug("İzin verilen uzantılar: %s", ", ".join(sorted(allowed_extensions)))
     records: List[FileRecord] = []
+    processed = 0
     for relative_path in iter_files(root_dir_abs, allowed_extensions):
         absolute_path = os.path.join(root_dir_abs, relative_path)
         stat = os.stat(absolute_path)
@@ -69,7 +73,13 @@ def build_inventory(root_dir: str, allowed_extensions: Set[str]) -> List[FileRec
             sha256_hex=sha256_of_file(absolute_path),
         )
         records.append(record)
+        processed += 1
+        if processed % 500 == 0:
+            logging.info("Taranan dosya: %d", processed)
+        elif processed % 100 == 0:
+            logging.debug("Taranan dosya: %d", processed)
     records.sort(key=lambda r: r.relative_path.lower())
+    logging.info("Tarama bitti. Toplam dosya: %d", len(records))
     return records
 
 
@@ -187,15 +197,23 @@ except Exception:
 
 def _find_default_config_path(explicit_path: Optional[str]) -> Optional[str]:
     if explicit_path:
+        logging.debug("Config path explicitly provided: %s", explicit_path)
         return explicit_path
     candidate = os.path.abspath("verify_file_integrity.ini")
-    return candidate if os.path.exists(candidate) else None
+    if os.path.exists(candidate):
+        logging.debug("Using default config path: %s", candidate)
+        return candidate
+    logging.debug("No config file found at default path: %s", candidate)
+    return None
 
 
 def _load_config_section(
     section_name: str, config_path: Optional[str]
 ) -> Dict[str, str]:
     if not config_path:
+        logging.debug(
+            "Config not used; no path provided for section [%s]", section_name
+        )
         return {}
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config dosyasi bulunamadi: {config_path}")
@@ -204,8 +222,14 @@ def _load_config_section(
     parser = configparser.ConfigParser()
     parser.read(config_path, encoding="utf-8")
     if not parser.has_section(section_name):
+        logging.debug("Config file %s has no section [%s]", config_path, section_name)
         return {}
     section = {k: v for k, v in parser.items(section_name)}
+    logging.debug(
+        "Loaded config section [%s] keys: %s",
+        section_name,
+        ", ".join(sorted(section.keys())),
+    )
     return section
 
 
@@ -234,6 +258,8 @@ def _merge_build_params(args: argparse.Namespace) -> Tuple[str, List[str], str]:
             "'output' degeri gerekli. CLI --output veya [build] output ile verin."
         )
 
+    logging.info("Build params => root=%s, output=%s", root, output)
+    logging.debug("Build params => ext list (raw)=%s", ext_list)
     return root, (ext_list or []), output
 
 
@@ -266,6 +292,13 @@ def _merge_check_params(
         args.report if getattr(args, "report", None) else section.get("report")
     )
 
+    logging.info(
+        "Check params => root=%s, input=%s, report=%s",
+        root,
+        input_path,
+        report_path,
+    )
+    logging.debug("Check params => ext list (raw)=%s", ext_list)
     return root, (ext_list or []), input_path, report_path
 
 
@@ -273,25 +306,39 @@ def _merge_check_params(
 
 
 def build_command(args: argparse.Namespace) -> int:
+    logging.info("Build started")
     exts = parse_extensions(args.ext)
+    logging.debug("Extensions after parse: %s", ", ".join(sorted(exts)))
     records = build_inventory(args.root, exts)
+    logging.info("Scanned %d files under %s", len(records), os.path.abspath(args.root))
     write_inventory_csv(records, args.output)
+    logging.info("Inventory CSV written to %s", args.output)
     print(f"Envanter oluşturuldu: {args.output} ({len(records)} kayıt)")
     return 0
 
 
 def check_command(args: argparse.Namespace) -> int:
+    logging.info("Check started")
     exts = parse_extensions(args.ext)
+    logging.debug("Extensions after parse: %s", ", ".join(sorted(exts)))
     baseline = read_inventory_csv(args.input)
+    logging.info("Loaded baseline entries: %d from %s", len(baseline), args.input)
     result = check_against_inventory(args.root, exts, baseline)
 
     report_text = format_report(result)
     if args.report:
         write_text(report_text, args.report)
+        logging.info("Report written to %s", args.report)
         print(f"Rapor kaydedildi: {args.report}")
     else:
         print(report_text)
 
+    logging.info(
+        "Summary => new=%d, deleted=%d, modified=%d",
+        len(result.new_files),
+        len(result.deleted_files),
+        len(result.modified_files),
+    )
     print(
         f"Yeni: {len(result.new_files)}, Silinmiş: {len(result.deleted_files)}, Değiştirilmiş: {len(result.modified_files)}"
     )
@@ -305,6 +352,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description=(
             "Alt klasörleri tarayarak belirli uzantılı dosyalar için hash envanteri oluşturur ve doğrular."
         ),
+    )
+    # Global logging verbosity
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Ayrıntı seviyesini artır (birden çok kez kullan: -vv)",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="count",
+        default=0,
+        help="Çıktıyı azalt (birden çok kez kullan: -qq)",
+    )
+    parser.add_argument(
+        "--log-file",
+        help="Log kaydinin yazilacagi dosya yolu (konsol loglarina ek olarak)",
     )
     # Global config option
     parser.add_argument(
@@ -361,12 +427,81 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
+    # Determine log file from config (priority) or CLI
+    config_path_early: Optional[str] = None
+    try:
+        config_path_early = _find_default_config_path(getattr(args, "config", None))
+    except Exception:
+        config_path_early = None
+
+    cfg_log_file: Optional[str] = None
+    if config_path_early and getattr(args, "command", None):
+        try:
+            sect = _load_config_section(str(args.command), config_path_early)
+            cfg_log_file = sect.get("log_file") if sect else None
+            if not cfg_log_file:
+                log_sect = _load_config_section("logging", config_path_early)
+                cfg_log_file = log_sect.get("log_file") if log_sect else None
+        except Exception:
+            cfg_log_file = None
+
+    selected_log_file = cfg_log_file or getattr(args, "log_file", None)
+
+    # Setup logging based on verbosity/quiet flags
+    def _compute_level(v: int, q: int) -> int:
+        if q:
+            return logging.ERROR if q >= 2 else logging.WARNING
+        if v:
+            return logging.DEBUG if v >= 2 else logging.INFO
+        return logging.INFO
+
+    level = _compute_level(getattr(args, "verbose", 0), getattr(args, "quiet", 0))
+    # Reconfigure root logger explicitly to ensure console output always appears
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    # Clear pre-existing handlers (if any)
+    for h in list(root_logger.handlers):
+        root_logger.removeHandler(h)
+
+    console_handler = logging.StreamHandler(stream=sys.stdout)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s %(levelname)s %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
+    root_logger.addHandler(console_handler)
+
+    logging.debug("Arguments parsed: %s", args)
+
+    # Optional file logging (config has priority over CLI)
+    if selected_log_file:
+        try:
+            log_dir = os.path.dirname(os.path.abspath(selected_log_file))
+            if log_dir and not os.path.exists(log_dir):
+                os.makedirs(log_dir, exist_ok=True)
+            file_handler = logging.FileHandler(selected_log_file, encoding="utf-8")
+            file_handler.setLevel(logging.getLogger().level)
+            file_handler.setFormatter(
+                logging.Formatter(
+                    fmt="%(asctime)s %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            logging.getLogger().addHandler(file_handler)
+            logging.info("Dosyaya loglama acildi: %s", selected_log_file)
+        except Exception as e:
+            logging.error("Log dosyasi acilamadi (%s): %s", selected_log_file, e)
+            print(f"Uyari: Log dosyasi acilamadi: {e}", file=sys.stderr)
+
     # Merge config values into args before dispatch
     if args.command == "build":
         try:
             root, ext_list, output = _merge_build_params(args)
         except Exception as e:
-            print(f"Hata: {e}")
+            logging.error("Parametre birlestirme hatasi (build): %s", e)
+            print(f"Hata: {e}", file=sys.stderr)
             return 2
         args.root = root
         args.ext = ext_list
@@ -375,7 +510,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             root, ext_list, input_path, report_path = _merge_check_params(args)
         except Exception as e:
-            print(f"Hata: {e}")
+            logging.error("Parametre birlestirme hatasi (check): %s", e)
+            print(f"Hata: {e}", file=sys.stderr)
             return 2
         args.root = root
         args.ext = ext_list
@@ -385,13 +521,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         return args.func(args)
     except KeyboardInterrupt:
-        print("İptal edildi.")
+        logging.warning("İşlem kullanıcı tarafından iptal edildi")
+        print("İptal edildi.", file=sys.stderr)
         return 130
     except FileNotFoundError as e:
-        print(f"Hata: Dosya bulunamadı: {e}")
+        logging.error("Dosya bulunamadı: %s", e)
+        print(f"Hata: Dosya bulunamadı: {e}", file=sys.stderr)
         return 2
     except Exception as e:
-        print(f"Beklenmeyen hata: {e}")
+        logging.exception("Beklenmeyen hata")
+        print(f"Beklenmeyen hata: {e}", file=sys.stderr)
         return 1
 
 

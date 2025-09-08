@@ -10,6 +10,9 @@ Komutlar iki alt başlıktan oluşur: `build` ve `check`.
 
 Global seçenekler:
 - `--config`: INI formatında ayar dosyasının yolu. Varsayılan olarak çalışma dizinindeki `verify_file_integrity.ini` aranır.
+- `-v`/`-vv`: Daha ayrıntılı log çıktısı (INFO/DEBUG)
+- `-q`/`-qq`: Daha sessiz çıktı (WARNING/ERROR)
+- `--log-file`: Logların dosyaya yazılması (config’teki `log_file` varsa config önceliklidir)
 
 #### Envanter oluşturma (build)
 ```
@@ -48,7 +51,11 @@ Komut sonunda özet ve (verildiyse) rapor üretilir.
 - `--report`: Metin raporunu dosyaya yaz (verilmezse konsola yazılır)
 
 ### Config Dosyası (INI)
-Varsayılan olarak çalışma dizinindeki `verify_file_integrity.ini` dosyası kullanılır. Farklı bir dosya için `--config` verin. CLI argümanları config değerlerini her zaman geçersiz kılar.
+Varsayılan olarak çalışma dizinindeki `verify_file_integrity.ini` dosyası kullanılır. Farklı bir dosya için `--config` verin.
+
+Öncelik kuralları:
+- Parametreler için: CLI > Config
+- Log dosyası için: Config (`[build]/[check] log_file` > `[logging] log_file`) > CLI `--log-file`
 
 Örnek `verify_file_integrity.ini`:
 ```ini
@@ -56,12 +63,17 @@ Varsayılan olarak çalışma dizinindeki `verify_file_integrity.ini` dosyası k
 root = .
 ext = .py,.env,.txt
 output = inventory.csv
+# log_file = logs\\build.log
 
 [check]
 root = .
 ext = .py,.env,.txt
 input = inventory.csv
 report = report.txt
+# log_file = logs\\check.log
+
+[logging]
+log_file = logs\\app.log
 ```
 
 ### Notlar
@@ -72,13 +84,19 @@ report = report.txt
 ### Örnek Akış
 1) Envanteri oluşturun:
 ```
-py verify_file_integrity.py --config verify_file_integrity.ini build
+py verify_file_integrity.py --config verify_file_integrity.ini -v build
 ```
 
 2) Değişiklikleri kontrol edin ve rapor üretin:
 ```
-py verify_file_integrity.py --config verify_file_integrity.ini check
+py verify_file_integrity.py --config verify_file_integrity.ini -vv check
 ```
+
+Dosyaya log yazma (CLI ile):
+```
+py verify_file_integrity.py --config verify_file_integrity.ini --log-file logs\\run.log build
+```
+Config’te log_file tanımlıysa CLI `--log-file` yerine config’teki dosyaya yazılır.
 
 # VerifyFileIntegrity
 
