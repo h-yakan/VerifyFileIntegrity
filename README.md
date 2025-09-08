@@ -1,3 +1,85 @@
+## VerifyFileIntegrity
+
+Basit ve hızlı bir şekilde dizin içeriğinin bütünlüğünü doğrulamak için dosya envanteri (path, size, mtime, sha256) oluşturur ve bu envantere göre değişiklikleri raporlar.
+
+### Kurulum
+- Python 3.8+ gerekir. Ek paket yoktur (standart kütüphane).
+
+### Kullanım
+Komutlar iki alt başlıktan oluşur: `build` ve `check`.
+
+Global seçenekler:
+- `--config`: INI formatında ayar dosyasının yolu. Varsayılan olarak çalışma dizinindeki `verify_file_integrity.ini` aranır.
+
+#### Envanter oluşturma (build)
+```
+py verify_file_integrity.py build --output inventory.csv
+```
+
+Config ile:
+```
+py verify_file_integrity.py --config verify_file_integrity.ini build
+```
+
+`build` komutu sonunda envanter CSV dosyası oluşur.
+
+#### Doğrulama (check)
+```
+py verify_file_integrity.py check --input inventory.csv
+```
+
+İsteğe bağlı:
+- `--root`: Taranacak kök dizin (varsayılan: `.` veya configteki değer)
+- `--ext`: Dahil edilecek uzantılar. Birden fazla kez verilebilir veya virgülle ayrılabilir.
+  - Örnek: `--ext .py --ext .env,.txt`
+
+
+
+Config ile:
+```
+py verify_file_integrity.py --config verify_file_integrity.ini check
+```
+
+Komut sonunda özet ve (verildiyse) rapor üretilir.
+
+İsteğe bağlı:
+- `--root`: Taranacak kök dizin (varsayılan: `.` veya configteki değer)
+- `--ext`: Dahil edilecek uzantılar (envanter ile uyumlu olması önerilir)
+- `--report`: Metin raporunu dosyaya yaz (verilmezse konsola yazılır)
+
+### Config Dosyası (INI)
+Varsayılan olarak çalışma dizinindeki `verify_file_integrity.ini` dosyası kullanılır. Farklı bir dosya için `--config` verin. CLI argümanları config değerlerini her zaman geçersiz kılar.
+
+Örnek `verify_file_integrity.ini`:
+```ini
+[build]
+root = .
+ext = .py,.env,.txt
+output = inventory.csv
+
+[check]
+root = .
+ext = .py,.env,.txt
+input = inventory.csv
+report = report.txt
+```
+
+### Notlar
+- `build` için `output` zorunludur (CLI veya config).
+- `check` için `input` zorunludur (CLI veya config).
+- Uzantılar (`--ext` veya `ext`) boş verilirse varsayılan olarak `{.py, .env}` kullanılır.
+
+### Örnek Akış
+1) Envanteri oluşturun:
+```
+py verify_file_integrity.py --config verify_file_integrity.ini build
+```
+
+2) Değişiklikleri kontrol edin ve rapor üretin:
+```
+py verify_file_integrity.py --config verify_file_integrity.ini check
+```
+
 # VerifyFileIntegrity
 
 `VerifyFileIntegrity`, belirlediğiniz klasörlerdeki dosyaların **envanterini** (path, boyut, tarih, SHA256 hash) çıkaran ve daha sonra bu envanterle karşılaştırma yaparak **dosya değişikliklerini (yeni, silinmiş, değiştirilmiş)** raporlayan bir araçtır.  

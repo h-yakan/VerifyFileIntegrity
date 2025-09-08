@@ -188,7 +188,7 @@ except Exception:
 def _find_default_config_path(explicit_path: Optional[str]) -> Optional[str]:
     if explicit_path:
         return explicit_path
-    candidate = os.path.abspath("verifyfileintegrity.ini")
+    candidate = os.path.abspath("verify_file_integrity.ini")
     return candidate if os.path.exists(candidate) else None
 
 
