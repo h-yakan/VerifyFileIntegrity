@@ -79,7 +79,7 @@ def write_inventory_csv(records: List[FileRecord], output_file: str) -> None:
         os.makedirs(output_dir, exist_ok=True)
     with open(output_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["path", "size", "mtime_utc", "sha256"]) 
+        writer.writerow(["path", "size", "mtime_utc", "sha256"])
         for r in records:
             writer.writerow([r.relative_path, str(r.file_size_bytes), r.modified_time_utc_iso, r.sha256_hex])
 
@@ -178,6 +178,99 @@ def write_text(content: str, output_file: str) -> None:
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(content)
 
+# --- Config support start ---
+try:
+    import configparser
+except Exception:
+    configparser = None  # Fallback if unavailable; we'll handle at runtime
+
+
+def _find_default_config_path(explicit_path: Optional[str]) -> Optional[str]:
+    if explicit_path:
+        return explicit_path
+    candidate = os.path.abspath("verifyfileintegrity.ini")
+    return candidate if os.path.exists(candidate) else None
+
+
+def _load_config_section(
+    section_name: str, config_path: Optional[str]
+) -> Dict[str, str]:
+    if not config_path:
+        return {}
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config dosyasi bulunamadi: {config_path}")
+    if configparser is None:
+        raise RuntimeError("configparser modulu kullanilamiyor")
+    parser = configparser.ConfigParser()
+    parser.read(config_path, encoding="utf-8")
+    if not parser.has_section(section_name):
+        return {}
+    section = {k: v for k, v in parser.items(section_name)}
+    return section
+
+
+def _merge_build_params(args: argparse.Namespace) -> Tuple[str, List[str], str]:
+    config_path = _find_default_config_path(getattr(args, "config", None))
+    section = _load_config_section("build", config_path)
+
+    # Prefer CLI over config; fall back to defaults where present
+    root = (
+        args.root
+        if getattr(args, "root", None) is not None
+        else section.get("root", ".")
+    )
+
+    ext_cli: Optional[List[str]] = getattr(args, "ext", None)
+    if ext_cli is not None:
+        ext_list = ext_cli
+    else:
+        ext_value = section.get("ext")
+        ext_list = [ext_value] if ext_value else None
+
+    output = args.output if getattr(args, "output", None) else section.get("output")
+
+    if not output:
+        raise ValueError(
+            "'output' degeri gerekli. CLI --output veya [build] output ile verin."
+        )
+
+    return root, (ext_list or []), output
+
+
+def _merge_check_params(
+    args: argparse.Namespace,
+) -> Tuple[str, List[str], str, Optional[str]]:
+    config_path = _find_default_config_path(getattr(args, "config", None))
+    section = _load_config_section("check", config_path)
+
+    root = (
+        args.root
+        if getattr(args, "root", None) is not None
+        else section.get("root", ".")
+    )
+
+    ext_cli: Optional[List[str]] = getattr(args, "ext", None)
+    if ext_cli is not None:
+        ext_list = ext_cli
+    else:
+        ext_value = section.get("ext")
+        ext_list = [ext_value] if ext_value else None
+
+    input_path = args.input if getattr(args, "input", None) else section.get("input")
+    if not input_path:
+        raise ValueError(
+            "'input' degeri gerekli. CLI --input veya [check] input ile verin."
+        )
+
+    report_path = (
+        args.report if getattr(args, "report", None) else section.get("report")
+    )
+
+    return root, (ext_list or []), input_path, report_path
+
+
+# --- Config support end ---
+
 
 def build_command(args: argparse.Namespace) -> int:
     exts = parse_extensions(args.ext)
@@ -213,13 +306,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Alt klasörleri tarayarak belirli uzantılı dosyalar için hash envanteri oluşturur ve doğrular."
         ),
     )
+    # Global config option
+    parser.add_argument(
+        "--config",
+        help="INI formatında ayarlar dosyası. [build] ve [check] bölümleri desteklenir.",
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     build_parser = subparsers.add_parser(
         "build", help="Dosya envanteri oluştur (path, size, mtime, sha256)"
     )
     build_parser.add_argument(
-        "--root", default=".", help="Taranacak kök dizin (varsayılan: .)"
+        "--root", default=None, help="Taranacak kök dizin (config yoksa varsayılan: .)"
     )
     build_parser.add_argument(
         "--ext",
@@ -228,8 +327,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     build_parser.add_argument(
         "--output",
-        required=True,
-        help="Oluşan envanter CSV dosyası yolu",
+        default=None,
+        help="Oluşan envanter CSV dosyası yolu (config ile verilebilir)",
     )
     build_parser.set_defaults(func=build_command)
 
@@ -237,7 +336,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "check", help="Önceki envantere göre değişiklikleri kontrol et"
     )
     check_parser.add_argument(
-        "--root", default=".", help="Taranacak kök dizin (varsayılan: .)"
+        "--root", default=None, help="Taranacak kök dizin (config yoksa varsayılan: .)"
     )
     check_parser.add_argument(
         "--ext",
@@ -245,10 +344,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Dahil edilecek uzantılar. Envanter ile uyumlu olması önerilir. Örn: --ext .py --ext .env,.txt",
     )
     check_parser.add_argument(
-        "--input", required=True, help="Önceki envanter CSV dosyası yolu"
+        "--input",
+        default=None,
+        help="Önceki envanter CSV dosyası yolu (config ile verilebilir)",
     )
     check_parser.add_argument(
-        "--report", help="Raporun kaydedileceği dosya yolu (verilmezse konsola yazılır)"
+        "--report",
+        help="Raporun kaydedileceği dosya yolu (verilmezse konsola yazılır; config ile verilebilir)",
     )
     check_parser.set_defaults(func=check_command)
 
@@ -258,6 +360,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+
+    # Merge config values into args before dispatch
+    if args.command == "build":
+        try:
+            root, ext_list, output = _merge_build_params(args)
+        except Exception as e:
+            print(f"Hata: {e}")
+            return 2
+        args.root = root
+        args.ext = ext_list
+        args.output = output
+    elif args.command == "check":
+        try:
+            root, ext_list, input_path, report_path = _merge_check_params(args)
+        except Exception as e:
+            print(f"Hata: {e}")
+            return 2
+        args.root = root
+        args.ext = ext_list
+        args.input = input_path
+        args.report = report_path
+
     try:
         return args.func(args)
     except KeyboardInterrupt:
